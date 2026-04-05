@@ -1,67 +1,60 @@
 name: RDP
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-  secure-rdp:
-    runs-on: windows-latest
-    timeout-minutes: 360
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
 
-    steps:
-      # تفعيل RDP وفتح البورت
-      - name: Enable RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          netsh advfirewall firewall add rule name="RDP-TCP" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service TermService -Force
+    steps:
+    - name: Enable RDP
+      run: |
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Restart-Service TermService -Force
 
-      # إنشاء يوزر
-      - name: Create User
-        run: |
-          $username = "admin"
-          $password = "Admin@1234"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+    - name: Create RDP User
+      run: |
+        $username = "TOOLBOLAP"
+        $password = "Admin@12345Aa"
+        $secure = ConvertTo-SecureString $password -AsPlainText -Force
 
-          New-LocalUser -Name $username -Password $securePass -FullName "RDP User" -Description "RDP Account"
-          Add-LocalGroupMember -Group "Administrators" -Member $username
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+        if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+          Remove-LocalUser -Name $username
+        }
 
-          echo "USERNAME=$username" >> $env:GITHUB_ENV
-          echo "PASSWORD=$password" >> $env:GITHUB_ENV
+        New-LocalUser -Name $username -Password $secure -AccountNeverExpires -PasswordNeverExpires
+        Add-LocalGroupMember -Group "Administrators" -Member $username
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
 
-      # تثبيت Tailscale
-      - name: Install Tailscale
-        run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-          $path = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest $url -OutFile $path
-          Start-Process msiexec.exe -ArgumentList "/i $path /qn" -Wait
-          Remove-Item $path
+    - name: Install Tailscale
+      run: |
+        $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.60.0-amd64.msi"
+        $path = "$env:TEMP\tailscale.msi"
+        Invoke-WebRequest $url -OutFile $path
+        Start-Process msiexec.exe -ArgumentList "/i $path /quiet /norestart" -Wait
 
-      # الاتصال بـ Tailscale
-      - name: Connect Tailscale
-        run: |
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=${{ secrets.TS_KEY }}
+    - name: Login Tailscale
+      env:
+        TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+      run: |
+        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --hostname=github-rdp
 
-          Start-Sleep -Seconds 10
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+    - name: Show RDP Info
+      run: |
+        $ts = "C:\Program Files\Tailscale\tailscale.exe"
+        $ip = & $ts ip -4
+        Write-Host "=============================="
+        Write-Host "RDP READY"
+        Write-Host "IP: $ip"
+        Write-Host "Username: TOOLBOLAP"
+        Write-Host "Password: Admin@12345Aa"
+        Write-Host "=============================="
 
-          echo "TS_IP=$ip" >> $env:GITHUB_ENV
-
-      # عرض معلومات الدخول
-      - name: Show RDP Info
-        run: |
-          echo "========== RDP ACCESS =========="
-          echo "IP: $env:TS_IP"
-          echo "User: $env:USERNAME"
-          echo "Pass: $env:PASSWORD"
-          echo "================================"
-
-      # إبقاء السيرفر شغال
-      - name: Keep Alive
-        run: |
-          while ($true) {
-            Start-Sleep -Seconds 300
-          }
+    - name: Keep Alive
+      run: |
+        while ($true) {
+          Start-Sleep -Seconds 300
+        }
